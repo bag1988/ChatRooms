@@ -1,0 +1,118 @@
+﻿@rendermode InteractiveServer
+@implements IAsyncDisposable
+
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">ChatRooms</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="flex-column">
+        <div class="nav-item px-3">
+            <form @onsubmit="AddUser">
+                <input class="form-control form-control-sm" type="text" required @bind="CurrentUser" />
+                <button type="submit" class="btn btn-success btn-sm my-2 w-100">Присоединиться</button>
+            </form>
+        </div>
+
+        @foreach (var user in Users.Where(x => !x.Equals(CurrentUser)))
+        {
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="@($"/Messages/{CurrentUser}/{user}")">
+                    @user
+                </NavLink>
+            </div>
+        }
+    </nav>
+</div>
+
+@code
+{
+    public string AppId = Guid.NewGuid().ToString();
+    public List<string> Users = new();
+    public string? CurrentUser = null;
+
+    private HubConnection? hubConnection;
+
+    string? SelectUser = null;
+
+    async Task AddUser()
+    {
+        if (!string.IsNullOrEmpty(CurrentUser) && !Users.Contains(CurrentUser) && hubConnection != null)
+        {
+            var b = await hubConnection.InvokeAsync<bool>("StartChat", CurrentUser);
+            if (b)
+            {
+                Users.Add(CurrentUser);
+            }
+        }
+    }
+
+    async Task ReConnectHub()
+    {
+        hubConnection = new HubConnectionBuilder()
+           .WithUrl(Navigation.ToAbsoluteUri("/chathub"), options =>
+           {
+               options.Headers.Add("AppId", AppId);
+           })
+           .Build();
+
+        hubConnection.On<string>("AddUser", (user) =>
+        {
+            if (!Users.Contains(user))
+            {
+                Users.Add(user);
+                InvokeAsync(StateHasChanged);
+            }
+        });
+
+        hubConnection.On("GetUserName", () =>
+        {
+            return CurrentUser;
+        });
+
+        hubConnection.Reconnected += OnReconnected;
+
+        await hubConnection.StartAsync();
+
+        await GetAllUser();
+    }
+
+    async Task OnReconnected(string? message)
+    {
+        Console.WriteLine("Hub reconnected");
+        await AddUser();
+    }
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReConnectHub();
+    }
+
+
+    async Task GetAllUser()
+    {
+        if (hubConnection != null)
+        {
+            Users = await hubConnection.InvokeAsync<List<string>?>("GetUsers") ?? new();
+        }
+    }
+
+
+
+    public bool IsConnected =>
+        hubConnection?.State == HubConnectionState.Connected;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+
+}

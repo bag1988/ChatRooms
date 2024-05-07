@@ -1,0 +1,45 @@
+﻿@page "/counter"
+
+@rendermode  InteractiveWebAssembly
+
+@inject HttpClient _client
+<PageTitle>Counter</PageTitle>
+
+
+
+<h1>Counter</h1>
+
+@if(pageLoad)
+{
+    <p role="status">Current count: @currentCount</p>
+
+    <button class="btn btn-primary" @onclick="IncrementCount">Click me</button>
+}
+else
+{
+    @:Loading....
+}
+
+
+
+@code {
+    private int currentCount = 0;
+
+    bool pageLoad = true;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        Console.WriteLine("OnAfterRender: firstRender = {0}", firstRender);
+        if(firstRender)
+        {
+            await _client.PostAsync("/weather", null);
+        }
+        pageLoad = false;
+    }
+
+    private async Task IncrementCount()
+    {
+        await _client.PostAsync("/weather", null);
+        currentCount++;
+    }
+}
