@@ -1,13 +1,16 @@
-﻿let writerTrack;
-let writableStream;
+﻿let writerVideoTrack;
+let writerAudioTrack;
 
+let videoDecoder = null;
+let audioDecoder = null;
 
+let mediaStreamRemote = null;
 
-const init = {
+const initVideoDecoder = {
   output: async (videoFrame) => {
-    if (writerTrack) {
-      await writerTrack.ready;
-      writerTrack.write(videoFrame);
+    if (writerVideoTrack) {
+      await writerVideoTrack.ready;
+      writerVideoTrack.write(videoFrame);
       videoFrame.close();
     }
   },
@@ -16,98 +19,150 @@ const init = {
   },
 };
 
-const config = {
-  codec: "vp09.00.10.08",
-  codedWidth: 1280,
-  codedHeight: 720,
+const initAudioDecoder = {
+  output: async (audioFrame) => {
+    if (writerAudioTrack) {
+      await writerAudioTrack.ready;
+      writerAudioTrack.write(audioFrame);
+      audioFrame.close();
+    }
+  },
+  error: (e) => {
+    console.log(e.message);
+  },
 };
 
 
-
-const decoder = new VideoDecoder(init);
-
-let videoFrameToBytes = new TransformStream({
-  async transform(chunk, controller) {
-    let frame = new VideoFrame(chunk.buffer, {
-      format: "NV12",
-      codedWidth: 640,
-      codedHeight: 360,
-      timestamp: 0
-    });
-    controller.enqueue(frame);
-    //frame.close();
-  }
-});
-
 async function initWriteChunk(remoteVideo) {
   if (remoteVideo) {
-
-    const { supported } = await VideoDecoder.isConfigSupported(config);
-    if (supported) {      
-      decoder.configure(config);
-    } else {
-      // Try another config.
-    }
-
-    let trackGenerator = new MediaStreamTrackGenerator({ kind: 'video' });
-    writerTrack = trackGenerator.writable.getWriter();
-
-    // const ds = new DecompressionStream("gzip");
-    //writer = videoFrameToBytes.writable.getWriter();
-    //videoFrameToBytes.readable.pipeThrough(ds).pipeTo(writerTrack);
-
-    const streamAfter = new MediaStream([trackGenerator]);
-    remoteVideo.srcObject = streamAfter;
-    remoteVideo.play();
+    mediaStreamRemote = new MediaStream();
+    remoteVideo.poster = "/sound.svg";
+    remoteVideo.srcObject = mediaStreamRemote;
   }
 }
 
-async function writeChank(bytea, timestamp, chunk_type) {
+async function InitVideoConfig(configVideoJson) {
+  console.debug("InitVideoConfig", configVideoJson);
   try {
+    if (configVideoJson) {
+      let configVideo = JSON.parse(configVideoJson);
 
-    //var info = JSON.parse(metadata);
+      let supportedVideo = await VideoDecoder.isConfigSupported(configVideo);
+      if (supportedVideo.supported) {
+        if (!videoDecoder || videoDecoder == null) {
+          videoDecoder = new VideoDecoder(initVideoDecoder);
+        }
+        videoDecoder.configure(configVideo);
 
-    const chunk = new EncodedVideoChunk({
-      timestamp: timestamp,
-      type: chunk_type,
-      data: bytea,
-    });
+        if (!writerVideoTrack) {
+          let trackGeneratorVideo = new MediaStreamTrackGenerator({ kind: 'video' });
+          writerVideoTrack = trackGeneratorVideo.writable.getWriter();
+          mediaStreamRemote.addTrack(trackGeneratorVideo);
+        }
+      }
+    }
+  }
+  catch (e) {
+    console.error("Ошибка инициализации видео декодара", e.message);
+  }
+}
 
-    decoder.decode(chunk);
+async function InitAudioConfig(configAudioJson) {
+  console.debug("InitAudioConfig", configAudioJson);
+  try {
+    if (configAudioJson) {
+      let configAudio = JSON.parse(configAudioJson);
 
-    //if (writer) {
+      let desc = byteToUint8Array(configAudio.description);
 
-    //  await writer.ready;
-    //  writer.write(bytea);
+      let conf = {
+        codec: configAudio.codec,
+        description: desc.buffer,
+        numberOfChannels: configAudio.numberOfChannels,
+        sampleRate: configAudio.sampleRate
+      }
+      let supportedAudio = await AudioDecoder.isConfigSupported(conf);
+      if (supportedAudio.supported) {
+        if (!audioDecoder || audioDecoder == null) {
+          audioDecoder = new AudioDecoder(initAudioDecoder);
+        }
 
+        audioDecoder.configure(conf);
 
-    //}
+        if (!writerAudioTrack) {
+          let trackGeneratorAudio = new MediaStreamTrackGenerator({ kind: 'audio' });
+          writerAudioTrack = trackGeneratorAudio.writable.getWriter();
+          mediaStreamRemote.addTrack(trackGeneratorAudio);
+        }
 
-    //if (writerTrack) {
-    //  await writerTrack.ready;
-    //  let frame = new VideoFrame(bytea, {
-    //    format: "NV12",
-    //    codedWidth: 640,
-    //    codedHeight: 360,
-    //    timestamp: 0
-    //  });
-    //  writerTrack.write(frame);
-    //  frame.close();
-    //}
+      }
+    }
+  }
+  catch (e) {
+    console.error("Ошибка инициализации аудио декодара", e.message);
+  }
+}
+
+function byteToUint8Array(byteArray) {
+  console.log(byteArray);
+  var uint8Array = new Uint8Array(19);
+  for (var i = 0; i < uint8Array.length; i++) {
+    uint8Array[i] = byteArray[i];
+  }
+
+  return uint8Array;
+}
+
+async function writeVideoChank(bytea, timestamp, chunk_type) {
+  try {
+    if (videoDecoder) {
+      const chunk = new EncodedVideoChunk({
+        timestamp: timestamp,
+        type: chunk_type,
+        data: bytea,
+      });
+      videoDecoder.decode(chunk);
+    }
 
   }
   catch (e) {
     console.error(e.message);
-    writerTrack.close();
+    writerVideoTrack?.close();
   }
 }
 
-function stopWriteChank() {
+async function writeAudioChank(bytea, timestamp, chunk_type) {
   try {
-    if (writerTrack) {
-      console.log("writer close");
-      writerTrack.close();
-      writerTrack = null;
+    if (audioDecoder) {
+      const chunk = new EncodedAudioChunk({
+        timestamp: timestamp,
+        type: chunk_type,
+        data: bytea,
+      });
+      audioDecoder.decode(chunk);
+    }
+  }
+  catch (e) {
+    console.error(e.message);
+    writerAudioTrack?.close();
+  }
+}
+
+function stopWriteChunk() {
+  try {
+    if (writerVideoTrack) {
+      console.log("stop writer video");
+      writerVideoTrack.close();
+      videoDecoder.close();
+      videoDecoder = null;
+      writerVideoTrack = null;
+    }
+    if (writerAudioTrack) {
+      console.log("stop writer audio");
+      writerAudioTrack.close();
+      audioDecoder.close();
+      audioDecoder = null;
+      writerAudioTrack = null;
     }
   }
   catch (e) {

@@ -1,111 +1,139 @@
 ﻿class CreateReadableStream {
   constructor(stream, dotNet) {
-    this.stream = stream;
-    this.config = {
-      codec: "vp09.00.10.08",
-      width: 1280,
-      height: 720,
-      bitrate: 2000000,
-      //framerate:20
+    this.dotNet = dotNet;
+    this.audioTracks = stream.getAudioTracks()[0];
+    this.videoTracks = stream.getVideoTracks()[0];
+    this.settingVideo = this.videoTracks?.getSettings();
+    this.settingAudio = this.audioTracks?.getSettings();
+    this.configAudio = {
+      codec: "opus",
+      sampleRate: this.settingAudio?.sampleRate ?? 16_000,
+      numberOfChannels: this.settingAudio?.channelCount ?? 1,
+      bitrate: this.settingAudio ? ((this.settingAudio.sampleRate * (this.settingAudio.sampleSize / 8) * this.settingAudio.channelCount)) : 32_000
     };
-    this.init = {
+    this.initAudioEncoder = {
       output: async (chunk, metadata) => {
-        console.log("byteLength", chunk.byteLength);
+        if (metadata?.decoderConfig) {
+          let confAudio = {
+            codec: metadata.decoderConfig.codec,
+            description: new Uint8Array(metadata.decoderConfig.description),
+            numberOfChannels: metadata.decoderConfig.numberOfChannels,
+            sampleRate: metadata.decoderConfig.sampleRate
+          }
+          console.debug("Конфигурация аудио кодера", confAudio);
+          await this.dotNet.invokeMethodAsync("SendAudioConfig", JSON.stringify(confAudio));
+        }
         const chunkData = new Uint8Array(chunk.byteLength);
         chunk.copyTo(chunkData);
-        //console.log(chunk);
-        //console.log(metadata);
-        //console.log("metadata", JSON.stringify(metadata));
-        await this.dotNet.invokeMethodAsync("StreamToFile", chunkData, chunk.timestamp, chunk.type);
+        await this.dotNet.invokeMethodAsync("StreamAudioForChat", chunkData, chunk.timestamp, chunk.type);
       },
       error: (e) => {
-        console.log(e.message);
-        stopRecording();
+        console.error("Ошибка инициализации аудио кодирования", e);
+        this.stop();
       }
     };
-    this.videoEncoder = new VideoEncoder(this.init);
-    //this.compressSize = 0;
-    this.dotNet = dotNet;
-    this.videoFrameToBytes = new TransformStream({
-      async transform(videoFrame, controller) {
-        this.videoEncoder.encode(videoFrame, { keyFrame: true });
-        videoFrame.close();
-        controller.enqueue(videoFrame);
+    this.configVideo = {
+      codec: "vp09.00.10.08",
+      width: this.settingVideo?.width ?? 640,
+      height: this.settingVideo?.height ?? 480,
+      bitrate: 2_000_000,
+    };
+    this.initVideoEncoder = {
+      output: async (chunk, metadata) => {
+        if (metadata?.decoderConfig) {
+          console.debug("Конфигурация видео кодера", metadata.decoderConfig);
+          await this.dotNet.invokeMethodAsync("SendVideoConfig", JSON.stringify(metadata.decoderConfig));
+        }
+        const chunkData = new Uint8Array(chunk.byteLength);
+        chunk.copyTo(chunkData);
+        await this.dotNet.invokeMethodAsync("StreamVideoForChat", chunkData, chunk.timestamp, chunk.type);
+      },
+      error: (e) => {
+        console.error("Ошибка инициализации видео кодирования", e);
+        this.stop();
       }
-    });
-    this.done = false;
-    this.audioTrack = stream.getAudioTracks()[0];
-    //this.audioTrackSettings = this.audioTrack.getSettings();
-    //this.videoTrackSettings = this.stream.getVideoTracks()[0].getSettings();
-    this.trackVideoProcessor = new MediaStreamTrackProcessor({ track: stream.getVideoTracks()[0] });
+    };
+    this.audioEncoder = new AudioEncoder(this.initAudioEncoder);
+    this.videoEncoder = new VideoEncoder(this.initVideoEncoder);
+    this.trackAudioProcessor = this.audioTracks ? new MediaStreamTrackProcessor({ track: this.audioTracks }) : null;
+    this.trackVideoProcessor = this.videoTracks ? new MediaStreamTrackProcessor({ track: this.videoTracks }) : null;
   }
 
-  //async start2() {
-  //  let stream = new CompressionStream("gzip");
-  //  this.trackVideoProcessor.readable.pipeThrough(this.videoFrameToBytes).pipeThrough(stream);
+  getConfigVideo() {
+    return JSON.stringify(this.configVideo);
+  }
+  getConfigAudio() {
+    return JSON.stringify(this.configAudio);
+  }
 
-  //  for await (const chunks of stream.readable) {
-  //    console.log(chunk.length);
+  start() {
+    this.readVideoFrame();
+    this.readAudioFrame();
+  }
 
-  //    while (chunks.length > 0) {
-  //      let chunk = chunks.splice(0, 32000);
-  //      await dotNet.invokeMethodAsync("StreamToFile", new Uint8Array(chunk));
-  //    }
-  //  }
-  //}
-
-
-  async start() {
-    const { supported } = await VideoEncoder.isConfigSupported(this.config);
-    if (supported) {
-      this.videoEncoder.configure(this.config);
-      var reader = this.trackVideoProcessor.readable.getReader();
-      while (!this.done) {
-        const { value, done: doneReading } = await reader.read();
-        this.done = doneReading;
-        if (value) {
-          this.videoEncoder.encode(value, { keyFrame: true });
-          value.close();
+  readVideoFrame() {
+    try {
+      VideoEncoder.isConfigSupported(this.configVideo).then(async ({ supported }) => {
+        if (supported && this.trackVideoProcessor) {
+          this.videoEncoder.configure(this.configVideo);
+          for await (const chunk of this.trackVideoProcessor.readable) {
+            if (chunk) {
+              this.videoEncoder.encode(chunk, { keyFrame: true });
+              chunk.close();
+            }
+          }
         }
-      }
-      this.trackVideoProcessor = null;
+      });
+    }
+    catch (e) {
+      console.error("Ошибка чтения видео данных", e.message);
+    }
+  }
+
+  readAudioFrame() {
+    try {
+      AudioEncoder.isConfigSupported(this.configAudio).then(async ({ supported }) => {
+        if (supported && this.trackAudioProcessor) {
+          await this.audioEncoder.configure(this.configAudio);
+          for await (const chunk of this.trackAudioProcessor.readable) {
+            if (chunk) {
+              this.audioEncoder.encode(chunk, { keyFrame: true });
+              chunk.close();
+            }
+          }
+        }
+      });
+    }
+    catch (e) {
+      console.error("Ошибка чтения видео данных", e.message);
     }
   }
 
 
-  async start3() {
-    var reader = this.trackVideoProcessor.readable.getReader();//.pipeThrough(this.transformStream);
-
-    while (!this.done) {
-      const { value, done: doneReading } = await reader.read();
-      this.done = doneReading;
-
-      if (value) {
-        const rect = { x: 0, y: 0, width: value.codedWidth, height: value.codedHeight };
-
-        let buffer = new Uint8Array(value.allocationSize({ rect }));
-        console.log(value);
-        await value.copyTo(buffer, { rect });
-        console.log(`timestamp=${value.timestamp} type=${value.format} codedHeight=${value.codedHeight} codedWidth=${value.codedWidth}`);
-        console.log(`colorSpace=${JSON.stringify(value.colorSpace)} visibleRect = ${JSON.stringify(value.visibleRect)}`);
-        console.log(buffer.length);
-        let array = [...buffer];
-        while (array.length > 0) {
-          let chunk = array.splice(0, 32000);
-          await this.dotNet.invokeMethodAsync("StreamToFile", new Uint8Array(chunk));
-        }
-
-        //await this.dotNet.invokeMethodAsync("StreamToFile", buffer);
-        value.close();
-      }
-    }
-    //this.trackVideoProcessor.readable.cancel();
-    this.trackVideoProcessor = null;
-  }
   stop() {
-    if (this.trackVideoProcessor) {
-      this.done = true;
+    try {
+      this.videoTracks?.stop();
+      this.trackVideoProcessor?.readable.cancel();
+      this.trackVideoProcessor = null;
+      if (this.videoEncoder?.state != "closed") {
+        this.videoEncoder?.close();
+      }
+
+
+      this.audioTracks?.stop();
+      this.trackAudioProcessor?.readable.cancel();
+      this.trackAudioProcessor = null;
+      if (this.audioEncoder?.state != "closed") {
+        this.audioEncoder?.close();
+      }
+
+
+
+      this.dotNet.invokeMethodAsync("SendStopLocalStream");
     }
-    this.dotNet.invokeMethodAsync("StopStreamToFile");
+    catch (e) {
+      console.error("Ошибка остановки трансляции локальных данных", e.message);
+    }
+
   }
 }

@@ -1,0 +1,214 @@
+﻿@page "/"
+@page "/Messages/{CurrentUser}/{SelectUser}"
+@using Microsoft.AspNetCore.SignalR.Client
+@rendermode InteractiveWebAssembly
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+@inject HttpClient Http
+<PageTitle>@SelectUser</PageTitle>
+
+
+<button @onclick="()=>StartWebCam()">Start webcam stream</button>
+<button @onclick="()=>StartWebCam(false)">Start display stream</button>
+<button @onclick="StopLocalStream">Stop stream</button>
+
+<div class="d-flex">
+    <div>
+        <h2>Local</h2>
+        <video id="localVideo" class="d-none w-100" controls autoplay></video>
+    </div>
+    <div>
+        <h2>Remote</h2>
+        <video id="remoteVideo" class="w-100" controls autoplay></video>
+    </div>
+</div>
+
+
+
+
+<div class="form-group">
+    <label>
+        Message:
+        <input @bind="messageInput" size="50" />
+    </label>
+</div>
+<button @onclick="Send" disabled="@(!IsConnected)">Send</button>
+
+@foreach (var item in messages)
+{
+    <div>@item</div>
+}
+
+@code {
+    [Parameter]
+    public string CurrentUser { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? SelectUser { get; set; }
+
+    private HubConnection? hubConnection;
+
+    List<string> messages = new();
+
+    private string? messageInput;
+
+    DotNetObjectReference<Messages>? _this;
+
+    string? RemoteVideo = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _this = DotNetObjectReference.Create(this);
+        if (!string.IsNullOrEmpty(CurrentUser))
+        {
+            await ReConnectHub();
+        }
+    }
+
+    async Task ReConnectHub()
+    {
+        hubConnection = new HubConnectionBuilder()
+           .WithUrl(Navigation.ToAbsoluteUri($"/chathub?user={CurrentUser}")).WithAutomaticReconnect().Build();
+
+        hubConnection.On<string, string>("ReceiveMessage", (user, message) =>
+        {
+            var encodedMsg = $"{user}: {message}";
+            messages.Add(encodedMsg);
+            InvokeAsync(StateHasChanged);
+        });
+
+        hubConnection.On<string>("SetRemoteVideo", async (user) =>
+        {
+            await JS.InvokeVoidAsync("initRemotePlayer");
+        });
+
+        hubConnection.On<string>("SetStopRemoteStream", async (user) =>
+       {
+           await JS.InvokeVoidAsync("removeRemoteStream");
+       });
+
+        hubConnection.On<string, string>("SetVideoConfig", async (user, configJson) =>
+       {
+           await JS.InvokeVoidAsync("setVideoConfig", configJson);
+       });
+
+        hubConnection.On<string, string>("SetAudioConfig", async (user, configJson) =>
+       {
+           await JS.InvokeVoidAsync("setAudioConfig", configJson);
+       });
+
+        hubConnection.On<string, byte[], ulong, string>("SetRemoteVideoChunk", async (outUser, btoa, timestamp, chunk_type) =>
+        {
+            await JS.InvokeVoidAsync("setRemoteVideoChunk", btoa, timestamp, chunk_type);
+        });
+
+        hubConnection.On<string, byte[], ulong, string>("SetRemoteAudioChunk", async (outUser, btoa, timestamp, chunk_type) =>
+        {
+            await JS.InvokeVoidAsync("setRemoteAudioChunk", btoa, timestamp, chunk_type);
+        });
+
+        await hubConnection.StartAsync();
+
+        await GetAllMessages();
+    }
+    async Task GetAllMessages()
+    {
+        if (hubConnection != null)
+        {
+            messages = await hubConnection.InvokeAsync<List<string>?>("GetAllMessagesForUser", SelectUser) ?? new();
+        }
+    }
+
+    async Task StartWebCam(bool isWebCam = true)
+    {
+        var isOkStart = await JS.InvokeAsync<bool?>("StartLocalStream", _this, isWebCam);
+
+        if (isOkStart == false)
+        {
+            await SendStopLocalStream();
+        }
+        else if (hubConnection != null && IsConnected)
+        {
+            await hubConnection.SendAsync("SendVideoForUser", CurrentUser, SelectUser);
+        }
+    }
+    private Stream GetFileStream(string url)
+    {
+        var readFile = new FileStream(url, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        return readFile;
+    }
+
+    async Task StopLocalStream()
+    {
+        await JS.InvokeVoidAsync("StopLocalStream");
+    }
+
+    [JSInvokable(nameof(StreamVideoForChat))]
+    public async Task StreamVideoForChat(byte[] btoa, ulong timestamp, string chunk_type)
+    {
+        if (hubConnection != null && IsConnected)
+        {
+            await hubConnection.SendAsync("StreamVideoForChat", CurrentUser, SelectUser, btoa, timestamp, chunk_type);
+        }
+    }
+
+    [JSInvokable(nameof(SendVideoConfig))]
+    public async Task SendVideoConfig(string config)
+    {
+        if (hubConnection != null && IsConnected)
+        {
+            await hubConnection.SendAsync("SendVideoConfig", CurrentUser, SelectUser, config);
+        }
+    }
+
+    [JSInvokable(nameof(SendAudioConfig))]
+    public async Task SendAudioConfig(string config)
+    {
+        if (hubConnection != null && IsConnected)
+        {
+            await hubConnection.SendAsync("SendAudioConfig", CurrentUser, SelectUser, config);
+        }
+    }
+
+
+    [JSInvokable(nameof(StreamAudioForChat))]
+    public async Task StreamAudioForChat(byte[] btoa, ulong timestamp, string chunk_type)
+    {
+        if (hubConnection != null && IsConnected)
+        {
+            await hubConnection.SendAsync("StreamAudioForChat", CurrentUser, SelectUser, btoa, timestamp, chunk_type);
+        }
+    }
+
+    [JSInvokable(nameof(SendStopLocalStream))]
+    public async Task SendStopLocalStream()
+    {
+        if (hubConnection != null && IsConnected)
+        {
+            await hubConnection.SendAsync("SendStopLocalStream", CurrentUser, SelectUser);
+        }
+    }
+
+    private async Task Send()
+    {
+        if (!string.IsNullOrEmpty(messageInput))
+        {
+            messages.Add(messageInput);
+            if (hubConnection is not null)
+            {
+                await hubConnection.SendAsync("SendMessageForUser", CurrentUser, SelectUser, messageInput);
+            }
+            messageInput = null;
+        }
+    }
+
+    public bool IsConnected => hubConnection?.State == HubConnectionState.Connected;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+}

@@ -83,26 +83,74 @@ namespace ChatRooms
             return messages.Where(x => x.Key == userName).SelectMany(x => x.Value);
         }
 
-        public async Task SendVideoForUser(string outUser, string forUser, string urlFile)
+        public async Task SendVideoForUser(string outUser, string forUser)
         {
             if (users.Any(x => x.UserName == forUser))
             {
                 var r = users.FirstOrDefault(x => x.UserName == forUser)?.ConnectId;
                 if (r?.Count > 0)
                 {
-                    await Clients.Clients(r).SendAsync("SetRemoteVideo", outUser, urlFile);
+                    await Clients.Clients(r).SendAsync("SetRemoteVideo", outUser);
                 }
             }
         }
 
-        public async Task SendStreamForUser(string outUser, string forUser, byte[] stream)
+        public async Task SendStopLocalStream(string outUser, string forUser)
         {
             if (users.Any(x => x.UserName == forUser))
             {
                 var r = users.FirstOrDefault(x => x.UserName == forUser)?.ConnectId;
                 if (r?.Count > 0)
                 {
-                    await Clients.Clients(r).SendAsync("SetStreamVideo", outUser, stream);
+                    await Clients.Clients(r).SendAsync("SetStopRemoteStream", outUser);
+                }
+            }
+        }
+
+        public async Task StreamVideoForChat(string outUser, string forUser, byte[] btoa, ulong timestamp, string chunk_type)
+        {
+            if (users.Any(x => x.UserName == forUser))
+            {
+                var r = users.FirstOrDefault(x => x.UserName == forUser)?.ConnectId;
+                if (r?.Count > 0)
+                {
+                    await Clients.Clients(r).SendAsync("SetRemoteVideoChunk", outUser, btoa, timestamp, chunk_type);
+                }
+            }
+        }
+
+        public async Task SendVideoConfig(string outUser, string forUser, string configJson)
+        {
+            if (users.Any(x => x.UserName == forUser))
+            {
+                var r = users.FirstOrDefault(x => x.UserName == forUser)?.ConnectId;
+                if (r?.Count > 0)
+                {
+                    await Clients.Clients(r).SendAsync("SetVideoConfig", outUser, configJson);
+                }
+            }
+        }
+
+        public async Task SendAudioConfig(string outUser, string forUser, string configJson)
+        {
+            if (users.Any(x => x.UserName == forUser))
+            {
+                var r = users.FirstOrDefault(x => x.UserName == forUser)?.ConnectId;
+                if (r?.Count > 0)
+                {
+                    await Clients.Clients(r).SendAsync("SetAudioConfig", outUser, configJson);
+                }
+            }
+        }
+
+        public async Task StreamAudioForChat(string outUser, string forUser, byte[] btoa, ulong timestamp, string chunk_type)
+        {
+            if (users.Any(x => x.UserName == forUser))
+            {
+                var r = users.FirstOrDefault(x => x.UserName == forUser)?.ConnectId;
+                if (r?.Count > 0)
+                {
+                    await Clients.Clients(r).SendAsync("SetRemoteAudioChunk", outUser, btoa, timestamp, chunk_type);
                 }
             }
         }
@@ -130,7 +178,7 @@ namespace ChatRooms
                 var context = Context.GetHttpContext();
                 if (context != null)
                 {
-                    context.Request.Headers.TryGetValue("user", out var result);
+                    context.Request.Query.TryGetValue("user", out var result);
                     userName = result.FirstOrDefault();
                 }
                 return userName;

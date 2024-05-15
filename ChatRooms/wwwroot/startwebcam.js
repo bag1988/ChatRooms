@@ -1,39 +1,48 @@
 ﻿
 var videoRecord;
-async function startStream(dotNet, idWebCam) {
+async function StartLocalStream(dotNet, idWebCam) {
   var mediaStream = null;
   if (idWebCam == true) {
     mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: {
-        width: { exact: 640 },
-        height: { exact: 360 },
-        frameRate: 20
-      }
+      audio: {
+        sampleRate: 16_000,
+        sampleSize: 16,
+        channelCount: 1
+      },
+      video: true
     });
   }
   else {
     mediaStream = await navigator.mediaDevices.getDisplayMedia({
-      audio: true,
+      audio: {
+        suppressLocalAudioPlayback: false,
+      },
+      systemAudio: "include",
       video: {
         displaySurface: "window"
       }
     });
+
+    //if (mediaStream.getAudioTracks().length == 0) {
+
+    //  let audioTrack = await navigator.mediaDevices.getUserMedia({
+    //    audio: true,
+    //    video: false
+    //  });
+    //  mediaStream.addTrack(audioTrack.getAudioTracks()[0]);
+    //}
   }
 
   if (mediaStream) {
     var localVideo = document.querySelector("#localVideo");
-
     if (localVideo) {
       localVideo.srcObject = mediaStream;
       localVideo.classList.remove("d-none");
-
       if (videoRecord) {
         videoRecord.stop();
         videoRecord = null;
       }
-      //videoRecord = new VideoRecord(localVideo.captureStream(25), dotNet);
-      videoRecord = new CreateReadableStream(localVideo.captureStream(), dotNet);
+      videoRecord = new CreateReadableStream(mediaStream, dotNet);
       videoRecord.start();
       return true;
     }
@@ -41,7 +50,7 @@ async function startStream(dotNet, idWebCam) {
   return false;
 }
 
-function stopStream() {
+function StopLocalStream() {
   var localVideo = document.querySelector("#localVideo");
 
   if (localVideo && localVideo.srcObject) {
@@ -58,51 +67,65 @@ function stopStream() {
   }
 }
 
+//for remote video
 function initRemotePlayer() {
   var remoteVideo = document.querySelector("#remoteVideo");
   if (remoteVideo) {
-    remoteVideo.onemptied = (event) => {
-      //console.log("onemptied");
-    };
-    remoteVideo.oncanplay = (event) => {
-      //console.log("oncanplay");
-    };
-    remoteVideo.ondurationchange = (event) => {
-      //console.log("ondurationchange");
-      if (remoteVideo.buffered.length > 0) {
-        remoteVideo.play();
-      }
-      else {
-        console.log("No have buffered for play");
-      }
-    };
-    remoteVideo.onwaiting = (event) => {
-      //console.log("onwaiting");
-    };
-    remoteVideo.ontimeupdate = (event) => {
-      //console.log("ontimeupdate");
-    };
-    remoteVideo.onprogress = (event) => {
-      //console.log("onprogress");
-    };
     remoteVideo.setAttribute('crossorigin', 'anonymous');
-
     initWriteChunk(remoteVideo);
   }
 }
 
-window.setStream = (bytes, timestamp, chunk_type) => {
+
+window.setRemoteVideoChunk = (bytes, timestamp, chunk_type) => {
   try {
-    writeChank(bytes, timestamp, chunk_type);
+    writeVideoChank(bytes, timestamp, chunk_type);
+  }
+  catch (e) {
+    console.error(e.message);
+  }
+}
+window.setRemoteAudioChunk = (bytes, timestamp, chunk_type) => {
+  try {
+    writeAudioChank(bytes, timestamp, chunk_type);
   }
   catch (e) {
     console.error(e.message);
   }
 }
 
-window.removeWorker = () => {
+
+window.setVideoConfig = (configJson) => {
   try {
-    stopWriteChank();
+    InitVideoConfig(configJson);
+  }
+  catch (e) {
+    console.error(e.message);
+  }
+}
+
+window.setAudioConfig = (configJson) => {
+  try {
+    InitAudioConfig(configJson);
+  }
+  catch (e) {
+    console.error(e.message);
+  }
+}
+
+//window.setStream = (bytes, timestamp, chunk_type) => {
+//  try {
+//    writeChank(bytes, timestamp, chunk_type);
+//  }
+//  catch (e) {
+//    console.error(e.message);
+//  }
+//}
+
+window.removeRemoteStream = () => {
+  try {
+    stopWriteChunk();
+    document.querySelector("#remoteVideo")?.pause();
   }
   catch (e) {
     console.error(e.message);
