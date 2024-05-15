@@ -59,13 +59,6 @@
     this.trackVideoProcessor = this.videoTracks ? new MediaStreamTrackProcessor({ track: this.videoTracks }) : null;
   }
 
-  getConfigVideo() {
-    return JSON.stringify(this.configVideo);
-  }
-  getConfigAudio() {
-    return JSON.stringify(this.configAudio);
-  }
-
   start() {
     this.readVideoFrame();
     this.readAudioFrame();
