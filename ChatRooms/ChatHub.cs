@@ -1,5 +1,7 @@
-﻿using ChatRooms.Components;
+﻿using ChatRooms.Client;
+using ChatRooms.Components;
 using Microsoft.AspNetCore.SignalR;
+using System.Threading.Channels;
 
 namespace ChatRooms
 {
@@ -115,6 +117,34 @@ namespace ChatRooms
                 if (r?.Count > 0)
                 {
                     await Clients.Clients(r).SendAsync("SetRemoteVideoChunk", outUser, btoa, timestamp, chunk_type);
+                }
+            }
+        }
+
+        public async Task StreamVideoForChatChannel(string outUser, string forUser, ChannelReader<VideoChunk> stream)
+        {
+            if (users.Any(x => x.UserName == forUser))
+            {
+                var r = users.FirstOrDefault(x => x.UserName == forUser)?.ConnectId;
+                if (r?.Count > 0)
+                {
+                    List<byte>? tempVideoChunk = null;
+                    while (await stream.WaitToReadAsync())
+                    {
+                        while (stream.TryRead(out var item))
+                        {
+                            tempVideoChunk ??= new();
+
+                            tempVideoChunk.AddRange(item.Chunk);
+                            Console.WriteLine($"Timestamp {item.Timestamp} is last {item.IsLastChunk}, temp length {tempVideoChunk.Count}");
+
+                            if (item.IsLastChunk)
+                            {
+                                await Clients.Clients(r).SendAsync("SetRemoteVideoChunk", outUser, tempVideoChunk.ToArray(), item.Timestamp, item.ChunkType);
+                                tempVideoChunk = null;
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -13,18 +13,12 @@ async function StartLocalStream(dotNet, idWebCam) {
     });
   }
   else {
-    mediaStream = await navigator.mediaDevices.getDisplayMedia({
-      audio: {
-        suppressLocalAudioPlayback: false,
-      },
-      systemAudio: "include",
+    mediaStream = await navigator.mediaDevices.getDisplayMedia({      
       video: {
         displaySurface: "window"
       }
     });
-
     //if (mediaStream.getAudioTracks().length == 0) {
-
     //  let audioTrack = await navigator.mediaDevices.getUserMedia({
     //    audio: true,
     //    video: false
@@ -36,18 +30,33 @@ async function StartLocalStream(dotNet, idWebCam) {
   if (mediaStream) {
     var localVideo = document.querySelector("#localVideo");
     if (localVideo) {
-      localVideo.srcObject = mediaStream;
-      localVideo.classList.remove("d-none");
-      if (videoRecord) {
-        videoRecord.stop();
-        videoRecord = null;
+      if (!!localVideo.srcObject) {
+        localVideo.srcObject.getVideoTracks().forEach(track => {
+          track.stop();
+          localVideo.srcObject.removeTrack(track);
+        });
+
+        localVideo.srcObject.addTrack(mediaStream.getVideoTracks()[0]);
+        if (videoRecord) {
+          videoRecord.replaceVideoTrack();
+        }
+        return 2;
       }
-      videoRecord = new CreateReadableStream(mediaStream, dotNet);
-      videoRecord.start();
-      return true;
+      else {
+        localVideo.srcObject = mediaStream;
+        localVideo.classList.remove("d-none");
+        if (videoRecord) {
+          videoRecord.stop();
+          videoRecord = null;
+        }
+        videoRecord = new CreateReadableStream(mediaStream, dotNet);
+        videoRecord.start();
+        return 1;
+      }
+
     }
   }
-  return false;
+  return 0;
 }
 
 function StopLocalStream() {

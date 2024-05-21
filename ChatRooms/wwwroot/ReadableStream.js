@@ -1,8 +1,9 @@
 ﻿class CreateReadableStream {
   constructor(stream, dotNet) {
     this.dotNet = dotNet;
-    this.audioTracks = stream.getAudioTracks()[0];
-    this.videoTracks = stream.getVideoTracks()[0];
+    this.stream = stream;
+    this.audioTracks = this.stream.getAudioTracks()[0];
+    this.videoTracks = this.stream.getVideoTracks()[0];
     this.settingVideo = this.videoTracks?.getSettings();
     this.settingAudio = this.audioTracks?.getSettings();
     this.configAudio = {
@@ -44,6 +45,7 @@
           console.debug("Конфигурация видео кодера", metadata.decoderConfig);
           await this.dotNet.invokeMethodAsync("SendVideoConfig", JSON.stringify(metadata.decoderConfig));
         }
+        console.debug("timestamp", chunk.timestamp, "type key", chunk.type);
         const chunkData = new Uint8Array(chunk.byteLength);
         chunk.copyTo(chunkData);
         await this.dotNet.invokeMethodAsync("StreamVideoForChat", chunkData, chunk.timestamp, chunk.type);
@@ -59,6 +61,18 @@
     this.trackVideoProcessor = this.videoTracks ? new MediaStreamTrackProcessor({ track: this.videoTracks }) : null;
   }
 
+  replaceVideoTrack() {
+    this.videoTracks = this.stream.getVideoTracks()[0];
+    this.settingVideo = this.videoTracks?.getSettings();
+
+    this.configVideo.width = this.settingVideo?.width ?? 640;
+    this.configVideo.height = this.settingVideo?.height ?? 480;
+
+    this.trackVideoProcessor?.readable.cancel();
+    this.trackVideoProcessor = new MediaStreamTrackProcessor({ track: this.videoTracks });
+    this.readVideoFrame();
+  }
+
   start() {
     this.readVideoFrame();
     this.readAudioFrame();
@@ -69,12 +83,22 @@
       VideoEncoder.isConfigSupported(this.configVideo).then(async ({ supported }) => {
         if (supported && this.trackVideoProcessor) {
           this.videoEncoder.configure(this.configVideo);
+          let frame_counter = 0;
           for await (const chunk of this.trackVideoProcessor.readable) {
             if (chunk) {
-              this.videoEncoder.encode(chunk, { keyFrame: true });
-              chunk.close();
+              if (this.videoEncoder.encodeQueueSize > 2) {
+                console.debug("---------------------skip frame");
+                chunk.close();
+              } else {
+                frame_counter++;
+                let insert_keyframe = frame_counter % 50 === 0;
+               
+                this.videoEncoder.encode(chunk, { keyFrame: insert_keyframe });
+                chunk.close();
+              }
             }
           }
+          console.debug("End read video stream");
         }
       });
     }
@@ -94,6 +118,7 @@
               chunk.close();
             }
           }
+          console.debug("End read audio stream");
         }
       });
     }
@@ -111,17 +136,12 @@
       if (this.videoEncoder?.state != "closed") {
         this.videoEncoder?.close();
       }
-
-
       this.audioTracks?.stop();
       this.trackAudioProcessor?.readable.cancel();
       this.trackAudioProcessor = null;
       if (this.audioEncoder?.state != "closed") {
         this.audioEncoder?.close();
       }
-
-
-
       this.dotNet.invokeMethodAsync("SendStopLocalStream");
     }
     catch (e) {

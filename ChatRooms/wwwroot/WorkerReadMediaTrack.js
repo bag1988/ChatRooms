@@ -1,8 +1,14 @@
 ﻿
+let ConfigEncoder = null;
+let DotNetCall = null;
 let media_source;
 
 onmessage = (e) => {
   if (e.data.msg == "init") {
+
+    ConfigEncoder = e.data.config;
+    DotNetCall = e.data.dotnet;
+
     media_source = new MediaSource();
     console.log("canConstructInDedicatedWorker", MediaSource.canConstructInDedicatedWorker);
     let handle = media_source.handle;

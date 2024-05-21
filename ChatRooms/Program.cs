@@ -12,7 +12,7 @@ builder.Services.AddResponseCompression(opts =>
 // Add services to the container.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents().AddHubOptions(options => {
-        options.MaximumReceiveMessageSize = 500000;
+        //options.MaximumReceiveMessageSize = 2_500_000;
     })
     .AddInteractiveWebAssemblyComponents();
 

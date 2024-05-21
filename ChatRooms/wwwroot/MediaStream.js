@@ -42,7 +42,7 @@ async function initWriteChunk(remoteVideo) {
 }
 
 async function InitVideoConfig(configVideoJson) {
-  console.debug("InitVideoConfig", configVideoJson);
+  console.debug("Инициализации видео декодирования", configVideoJson);
   try {
     if (configVideoJson) {
       let configVideo = JSON.parse(configVideoJson);
@@ -57,8 +57,40 @@ async function InitVideoConfig(configVideoJson) {
         if (!writerVideoTrack) {
           let trackGeneratorVideo = new MediaStreamTrackGenerator({ kind: 'video' });
           writerVideoTrack = trackGeneratorVideo.writable.getWriter();
+
+          trackGeneratorVideo.onmute = (event) => {
+            try {
+              //if (event.currentTarget && mediaStreamRemote.getTrackById(event.currentTarget.id)) {
+              //  event.currentTarget.stop();
+              //  mediaStreamRemote.removeTrack(event.currentTarget);
+              //}
+              //if (mediaStreamRemote.getTracks().length == 0) {
+              //  console.debug((new Date()).toLocaleString(), "Communication video onmute no other track, close stream");
+              //  stopWriteChunk();
+              //}
+              console.debug((new Date()).toLocaleString(), "Communication video onmute", event);
+            }
+            catch (e) {
+              console.error((new Date()).toLocaleString(), "Communication video error onmute", e);
+            }
+          };
+
+          trackGeneratorVideo.onunmute = (event) => {
+            try {
+              console.debug((new Date()).toLocaleString(), "Communication video onunmute", event);
+              // mediaStreamRemote.addTrack(event.currentTarget);
+              console.debug((new Date()).toLocaleString(), "Communication video onunmute video track length", mediaStreamRemote.getTracks());
+            }
+            catch (e) {
+              console.error((new Date()).toLocaleString(), "Communication video error onunmute", e);
+            }
+          };
+
           mediaStreamRemote.addTrack(trackGeneratorVideo);
         }
+      }
+      else {
+        console.debug("Нет поддержки видеокодека!");
       }
     }
   }
@@ -68,7 +100,7 @@ async function InitVideoConfig(configVideoJson) {
 }
 
 async function InitAudioConfig(configAudioJson) {
-  console.debug("InitAudioConfig", configAudioJson);
+  console.debug("Инициализации аудио декодирования", configAudioJson);
   try {
     if (configAudioJson) {
       let configAudio = JSON.parse(configAudioJson);
@@ -92,9 +124,12 @@ async function InitAudioConfig(configAudioJson) {
         if (!writerAudioTrack) {
           let trackGeneratorAudio = new MediaStreamTrackGenerator({ kind: 'audio' });
           writerAudioTrack = trackGeneratorAudio.writable.getWriter();
+                    
           mediaStreamRemote.addTrack(trackGeneratorAudio);
         }
-
+      }
+      else {
+        console.debug("Нет поддержки аудиокодека!");
       }
     }
   }
@@ -104,7 +139,6 @@ async function InitAudioConfig(configAudioJson) {
 }
 
 function byteToUint8Array(byteArray) {
-  console.log(byteArray);
   var uint8Array = new Uint8Array(19);
   for (var i = 0; i < uint8Array.length; i++) {
     uint8Array[i] = byteArray[i];
@@ -123,11 +157,9 @@ async function writeVideoChank(bytea, timestamp, chunk_type) {
       });
       videoDecoder.decode(chunk);
     }
-
   }
   catch (e) {
     console.error(e.message);
-    writerVideoTrack?.close();
   }
 }
 
@@ -144,7 +176,6 @@ async function writeAudioChank(bytea, timestamp, chunk_type) {
   }
   catch (e) {
     console.error(e.message);
-    writerAudioTrack?.close();
   }
 }
 
@@ -160,6 +191,7 @@ function stopWriteChunk() {
     if (writerAudioTrack) {
       console.log("stop writer audio");
       writerAudioTrack.close();
+      
       audioDecoder.close();
       audioDecoder = null;
       writerAudioTrack = null;

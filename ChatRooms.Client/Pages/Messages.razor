@@ -23,9 +23,6 @@
     </div>
 </div>
 
-
-
-
 <div class="form-group">
     <label>
         Message:
@@ -121,15 +118,20 @@
 
     async Task StartWebCam(bool isWebCam = true)
     {
-        var isOkStart = await JS.InvokeAsync<bool?>("StartLocalStream", _this, isWebCam);
+        var isOkStart = await JS.InvokeAsync<int?>("StartLocalStream", _this, isWebCam);
 
-        if (isOkStart == false)
+        if (isOkStart == null || isOkStart == 0)
         {
             await SendStopLocalStream();
         }
-        else if (hubConnection != null && IsConnected)
+        else if (hubConnection != null && IsConnected && isOkStart == 1)
         {
             await hubConnection.SendAsync("SendVideoForUser", CurrentUser, SelectUser);
+
+            channel?.Writer.TryComplete(new OperationCanceledException());
+            channel = System.Threading.Channels.Channel.CreateUnbounded<VideoChunk>();
+
+            await hubConnection.SendAsync("StreamVideoForChatChannel", CurrentUser, SelectUser, channel.Reader);
         }
     }
     private Stream GetFileStream(string url)
@@ -143,13 +145,31 @@
         await JS.InvokeVoidAsync("StopLocalStream");
     }
 
+    private System.Threading.Channels.Channel<VideoChunk>? channel;
+
+    private static readonly SemaphoreSlim semaphore = new(1, 1);
     [JSInvokable(nameof(StreamVideoForChat))]
     public async Task StreamVideoForChat(byte[] btoa, ulong timestamp, string chunk_type)
     {
-        if (hubConnection != null && IsConnected)
+        try
         {
-            await hubConnection.SendAsync("StreamVideoForChat", CurrentUser, SelectUser, btoa, timestamp, chunk_type);
+            await semaphore.WaitAsync();
+            if (hubConnection != null && IsConnected && channel != null)
+            {
+                var array = btoa.Chunk(24_000);
+                Console.WriteLine("Count chunk {0}", array.Count());
+                foreach (var item in array)
+                {
+                    await channel.Writer.WriteAsync(new VideoChunk(item, timestamp, chunk_type, array.Last().SequenceEqual(item)));
+                }
+                // await hubConnection.SendAsync("StreamVideoForChat", CurrentUser, SelectUser, btoa, timestamp, chunk_type);
+            }
         }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error StreamVideoForChat. IsConnected: {IsConnected}, btoa: {btoa.Length}, error: {ex.Message}");
+        }
+        semaphore.Release();
     }
 
     [JSInvokable(nameof(SendVideoConfig))]
@@ -174,9 +194,16 @@
     [JSInvokable(nameof(StreamAudioForChat))]
     public async Task StreamAudioForChat(byte[] btoa, ulong timestamp, string chunk_type)
     {
-        if (hubConnection != null && IsConnected)
+        try
         {
-            await hubConnection.SendAsync("StreamAudioForChat", CurrentUser, SelectUser, btoa, timestamp, chunk_type);
+            if (hubConnection != null && IsConnected)
+            {
+                await hubConnection.SendAsync("StreamAudioForChat", CurrentUser, SelectUser, btoa, timestamp, chunk_type);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error StreamAudioForChat. IsConnected: {IsConnected}, btoa: {btoa.Length}, error: {ex.Message}");
         }
     }
 
@@ -187,6 +214,7 @@
         {
             await hubConnection.SendAsync("SendStopLocalStream", CurrentUser, SelectUser);
         }
+        channel?.Writer.TryComplete();
     }
 
     private async Task Send()
